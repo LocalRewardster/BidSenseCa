@@ -1,0 +1,49 @@
+[tool.poetry]
+name = "bidsense-scrapers"
+version = "0.1.0"
+description = "BidSense.ca scraping scripts for Canadian tender portals"
+authors = ["Percy A. <percy@bidsense.ca>"]
+readme = "README.md"
+packages = [{include = "scrapers"}]
+
+[tool.poetry.dependencies]
+python = "^3.12"
+playwright = "^1.41.0"
+supabase = "^2.3.0"
+pydantic = "^2.5.0"
+pydantic-settings = "^2.1.0"
+python-dotenv = "^1.0.0"
+httpx = "^0.26.0"
+beautifulsoup4 = "^4.12.0"
+lxml = "^4.9.0"
+python-dateutil = "^2.8.2"
+loguru = "^0.7.2"
+tenacity = "^8.2.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.4.4"
+pytest-asyncio = "^0.23.0"
+pytest-playwright = "^0.4.0"
+black = "^23.12.1"
+isort = "^5.13.2"
+flake8 = "^7.0.0"
+
+[tool.poetry.scripts]
+scrape-all = "scrapers.runner:main"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.black]
+line-length = 88
+target-version = ['py312']
+
+[tool.isort]
+profile = "black"
+line_length = 88
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+asyncio_mode = "auto" 
