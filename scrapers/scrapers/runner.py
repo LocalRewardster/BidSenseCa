@@ -4,10 +4,10 @@ from typing import List, Dict
 
 from loguru import logger
 
-# TODO: Import new scrapers
-# from .canadabuys import CanadaBuysScraper
-# from .ontario_portal import OntarioPortalScraper
-# from .apc import APCScraper
+# Import new scrapers
+from .canadabuys import CanadaBuysScraper
+from .ontario_portal import OntarioPortalScraper
+from .apc import APCScraper
 
 
 class ScraperRunner:
@@ -15,10 +15,9 @@ class ScraperRunner:
     
     def __init__(self):
         self.scrapers = {
-            # TODO: Add new scrapers
-            # "canadabuys": CanadaBuysScraper,
-            # "ontario": OntarioPortalScraper,
-            # "apc": APCScraper,
+            "canadabuys": CanadaBuysScraper,
+            "ontario": OntarioPortalScraper,
+            "apc": APCScraper,
         }
     
     async def run_scraper(self, scraper_name: str, limit: int = None) -> int:
@@ -58,7 +57,7 @@ async def main():
     parser = argparse.ArgumentParser(description="BidSense Scrapers")
     parser.add_argument(
         "--scraper", 
-        choices=["all"],  # TODO: Add new scraper choices
+        choices=["canadabuys", "ontario", "apc", "all"], 
         default="all",
         help="Scraper to run"
     )

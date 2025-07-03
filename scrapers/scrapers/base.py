@@ -1,7 +1,7 @@
 import asyncio
 import time
 from abc import ABC, abstractmethod
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 from urllib.parse import urljoin
 
@@ -141,7 +141,7 @@ class BaseScraper(ABC):
             # Add source and timestamp
             tender_data.update({
                 "source": self.source_name,
-                "scraped_at": datetime.utcnow().isoformat()
+                "scraped_at": datetime.now(timezone.utc).isoformat()
             })
             
             # Check if tender already exists
