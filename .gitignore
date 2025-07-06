@@ -23,13 +23,12 @@ wheels/
 MANIFEST
 
 # Virtual environments
-.env
-.venv
-env/
 venv/
+env/
 ENV/
 env.bak/
 venv.bak/
+.venv/
 
 # Poetry
 poetry.lock
@@ -51,43 +50,140 @@ ehthumbs.db
 Thumbs.db
 
 # Logs
-logs
 *.log
+logs/
+
+# Coverage reports
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# Node.js
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-lerna-debug.log*
-
-# Runtime data
-pids
-*.pid
-*.seed
-*.pid.lock
-
-# Coverage directory used by tools like istanbul
-coverage/
-*.lcov
-
-# nyc test coverage
-.nyc_output
-
-# Dependency directories
-jspm_packages/
-
-# Optional npm cache directory
 .npm
 
-# Optional eslint cache
-.eslintcache
+# Frontend build
+dist/
+build/
 
-# Microbundle cache
-.rpt2_cache/
-.rts2_cache_cjs/
-.rts2_cache_es/
-.rts2_cache_umd/
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
 
-# Optional REPL history
-.node_repl_history
+# Debug files
+*debug*.html
+*debug*.png
+*debug*.txt
+debug_*.py
+canadabuys_debug_*.html
+bcbid_debug_*.png
+bcbid_*.png
+login_error.png
+
+# Temporary files
+*.tmp
+*.temp
+temp/
+tmp/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Scrapy
+.scrapy
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# IPython
+profile_default/
+ipython_config.py
+
+# pyenv
+.python-version
+
+# pipenv
+Pipfile.lock
+
+# PEP 582
+__pypackages__/
+
+# Celery
+celerybeat-schedule
+celerybeat.pid
+
+# SageMath parsed files
+*.sage.py
+
+# Spyder project settings
+.spyderproject
+.spyproject
+
+# Rope project settings
+.ropeproject
+
+# mkdocs documentation
+/site
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# Test files (keep main test directories but exclude temporary test files)
+test_*.py
+*_test.py
+test_data/
+test_output/
+
+# Workspace files
+*.code-workspace
+
+# PostCSS config (if auto-generated)
+postcss.config.js
+
+# Temporary migration files
+*_migration.py
+*_migration.sql
+
+# Analysis and exploration files
+analyze_*.py
+explore_*.py
+discover_*.py
+monitor_*.py
+manual_*.py
+examine_*.py
+debug_*.py
+fix_*.py
+populate_*.py
+generate_*.py
+apply_*.py
+add_*.py
+
+# Railway
+.railway/
+
+# Supabase
+.supabase/
+
+# Playwright
+test-results/
+playwright-report/
+playwright/.cache/
 
 # Output of 'npm pack'
 *.tgz
@@ -104,7 +200,6 @@ jspm_packages/
 
 # Nuxt.js build / generate output
 .nuxt
-dist
 
 # Gatsby files
 .cache/
@@ -117,32 +212,6 @@ public
 # Temporary folders
 tmp/
 temp/
-
-# Railway
-.railway/
-
-# Supabase
-.supabase/
-
-# Playwright
-test-results/
-playwright-report/
-playwright/.cache/
-
-# Environment files
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
-
-# Database
-*.db
-*.sqlite
-*.sqlite3
-
-# Backup files
-*.bak
-*.backup
 
 # API keys and secrets
 secrets.json

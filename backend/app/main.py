@@ -2,9 +2,17 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import uvicorn
+import asyncio
+import logging
+from datetime import datetime, timezone
 
 from app.config import settings
 from app.api.v1.api import api_router
+from app.services.scheduler import scraper_scheduler
+
+# Configure logging
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
 
 def create_app() -> FastAPI:
@@ -30,6 +38,30 @@ def create_app() -> FastAPI:
     # Include API router
     app.include_router(api_router, prefix="/api/v1")
     
+    @app.on_event("startup")
+    async def startup_event():
+        """Startup event handler."""
+        logger.info("Starting BidSense API...")
+        
+        # Start the scraper scheduler in the background
+        try:
+            await scraper_scheduler.start()
+            logger.info("Scraper scheduler started successfully")
+        except Exception as e:
+            logger.error(f"Failed to start scraper scheduler: {e}")
+    
+    @app.on_event("shutdown")
+    async def shutdown_event():
+        """Shutdown event handler."""
+        logger.info("Shutting down BidSense API...")
+        
+        # Stop the scraper scheduler
+        try:
+            await scraper_scheduler.stop()
+            logger.info("Scraper scheduler stopped successfully")
+        except Exception as e:
+            logger.error(f"Error stopping scraper scheduler: {e}")
+    
     @app.get("/")
     async def root():
         """Root endpoint with basic info."""
@@ -44,9 +76,16 @@ def create_app() -> FastAPI:
     @app.get("/health")
     async def health_check():
         """Health check endpoint."""
+        # Get scheduler status
+        scheduler_status = scraper_scheduler.get_status()
+        
         return {
             "status": "healthy",
-            "timestamp": "2025-01-02T00:00:00Z",  # TODO: Use actual timestamp
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "scheduler": {
+                "running": scheduler_status["running"],
+                "initialized": scheduler_status["initialized"]
+            }
         }
     
     @app.exception_handler(Exception)

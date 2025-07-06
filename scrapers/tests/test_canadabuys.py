@@ -1,215 +1,250 @@
+"""
+Tests for CanadaBuys bid source.
+"""
+
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
+import asyncio
 from datetime import datetime, timezone
-from bs4 import BeautifulSoup
+from unittest.mock import AsyncMock, patch, MagicMock
+from typing import Dict, List, Any
 
-from scrapers.canadabuys import CanadaBuysScraper
+from ..bidsources.canadabuys import CanadaBuysSource, stream_opportunities
+from ..models.opportunity import Opportunity
 
 
-class TestCanadaBuysScraper:
-    """Test CanadaBuys scraper functionality."""
+class TestCanadaBuysSource:
+    """Unit tests for CanadaBuys source."""
     
     @pytest.fixture
-    def scraper(self):
-        """Create a scraper instance for testing."""
-        return CanadaBuysScraper()
+    def source(self):
+        """Create a CanadaBuys source instance for testing."""
+        return CanadaBuysSource()
     
     @pytest.fixture
-    def sample_search_page(self):
-        """Sample search results page HTML."""
-        return """
-        <html>
-            <body>
-                <div class="search-results">
-                    <div class="opportunity-item">
-                        <h3><a href="/opportunity/123">Sample Tender Title</a></h3>
-                        <div class="opportunity-meta">
-                            <span class="reference">REF-2024-001</span>
-                            <span class="organization">Public Works Canada</span>
-                            <span class="closing-date">2024-12-31</span>
-                        </div>
-                        <div class="opportunity-description">
-                            This is a sample tender description for testing purposes.
-                        </div>
-                    </div>
-                    <div class="opportunity-item">
-                        <h3><a href="/opportunity/456">Another Tender</a></h3>
-                        <div class="opportunity-meta">
-                            <span class="reference">REF-2024-002</span>
-                            <span class="organization">Transport Canada</span>
-                            <span class="closing-date">2024-11-15</span>
-                        </div>
-                        <div class="opportunity-description">
-                            Another sample tender description.
-                        </div>
-                    </div>
-                </div>
-            </body>
-        </html>
-        """
-    
-    @pytest.fixture
-    def sample_detail_page(self):
-        """Sample tender detail page HTML."""
-        return """
-        <html>
-            <body>
-                <div class="opportunity-details">
-                    <h1>Sample Tender Title</h1>
-                    <div class="opportunity-info">
-                        <div class="reference">Reference: REF-2024-001</div>
-                        <div class="organization">Organization: Public Works Canada</div>
-                        <div class="closing-date">Closing Date: December 31, 2024</div>
-                        <div class="contract-value">Contract Value: $100,000 - $500,000</div>
-                        <div class="description">
-                            <p>This is a detailed description of the tender opportunity.</p>
-                            <p>It includes multiple paragraphs with important information.</p>
-                        </div>
-                        <div class="contact-info">
-                            <div class="contact-name">Contact: John Doe</div>
-                            <div class="contact-email">Email: john.doe@canada.ca</div>
-                            <div class="contact-phone">Phone: (613) 555-0123</div>
-                        </div>
-                    </div>
-                </div>
-            </body>
-        </html>
-        """
-    
-    def test_scraper_initialization(self, scraper):
-        """Test scraper initializes correctly."""
-        assert scraper.name == "canadabuys"
-        assert scraper.base_url == "https://canadabuys.canada.ca"
-        assert scraper.search_url == "https://canadabuys.canada.ca/en/tender-opportunities"
-    
-    def test_get_search_url(self, scraper):
-        """Test search URL generation."""
-        url = scraper.get_search_url()
-        assert "canadabuys.canada.ca" in url
-        assert "tender-opportunities" in url
-    
-    def test_parse_search_results(self, scraper, sample_search_page):
-        """Test parsing search results page."""
-        soup = BeautifulSoup(sample_search_page, 'html.parser')
-        results = scraper.parse_search_results(soup)
-        
-        assert len(results) == 2
-        assert results[0]['title'] == "Sample Tender Title"
-        assert results[0]['url'] == "/opportunity/123"
-        assert results[0]['reference'] == "REF-2024-001"
-        assert results[0]['organization'] == "Public Works Canada"
-        assert results[1]['title'] == "Another Tender"
-        assert results[1]['url'] == "/opportunity/456"
-    
-    def test_parse_tender_details(self, scraper, sample_detail_page):
-        """Test parsing tender detail page."""
-        soup = BeautifulSoup(sample_detail_page, 'html.parser')
-        details = scraper.parse_tender_details(soup, "https://canadabuys.canada.ca/opportunity/123")
-        
-        assert details['title'] == "Sample Tender Title"
-        assert details['reference'] == "REF-2024-001"
-        assert details['organization'] == "Public Works Canada"
-        assert details['closing_date'] == "2024-12-31"
-        assert details['contract_value'] == "$100,000 - $500,000"
-        assert "detailed description" in details['description']
-        assert details['contact_name'] == "John Doe"
-        assert details['contact_email'] == "john.doe@canada.ca"
-        assert details['contact_phone'] == "(613) 555-0123"
-        assert details['source_url'] == "https://canadabuys.canada.ca/opportunity/123"
-    
-    def test_parse_date_formats(self, scraper):
-        """Test parsing various date formats."""
-        # Test different date formats that might appear
-        test_cases = [
-            ("December 31, 2024", "2024-12-31"),
-            ("Dec 31, 2024", "2024-12-31"),
-            ("31/12/2024", "2024-12-31"),
-            ("2024-12-31", "2024-12-31"),
-        ]
-        
-        for input_date, expected in test_cases:
-            parsed = scraper.parse_date(input_date)
-            assert parsed == expected
+    def mock_response_data(self):
+        """Mock response data from CanadaBuys API."""
+        return {
+            "content": [
+                {
+                    "noticeId": "729181",
+                    "title": "Environmental Consulting Services – Fraser Valley",
+                    "summary": "Provision of consulting for stream restoration and environmental assessment services in the Fraser Valley region.",
+                    "organization": "Ministry of Water, Land and Resource Stewardship",
+                    "jurisdiction": "BC",
+                    "closingDate": "2025-08-14T21:00:00Z",
+                    "procurementCategory": "Services",
+                    "gsin": "R199",
+                    "documents": [
+                        {
+                            "type": "RFP",
+                            "url": "https://canadabuys.canada.ca/documents/rfp-729181.pdf"
+                        }
+                    ]
+                },
+                {
+                    "noticeId": "729182",
+                    "title": "IT Infrastructure Upgrade",
+                    "summary": "Upgrade of IT infrastructure and network systems for government offices.",
+                    "organization": "Ministry of Technology",
+                    "jurisdiction": "BC",
+                    "closingDate": "2025-07-30T18:00:00Z",
+                    "procurementCategory": "Goods",
+                    "gsin": "N701",
+                    "documents": []
+                }
+            ],
+            "page": 0,
+            "size": 200,
+            "totalElements": 68
+        }
     
     @pytest.mark.asyncio
-    async def test_scrape_tenders_success(self, scraper, sample_search_page, sample_detail_page):
-        """Test successful tender scraping."""
-        with patch.object(scraper, 'get_page', new_callable=AsyncMock) as mock_get_page:
-            # Mock search page
-            mock_get_page.return_value = sample_search_page
-            
-            # Mock detail pages
-            mock_get_page.side_effect = [sample_search_page, sample_detail_page, sample_detail_page]
-            
-            with patch.object(scraper, 'save_tender', new_callable=AsyncMock) as mock_save:
-                mock_save.return_value = True
+    async def test_fetch_page_success(self, source, mock_response_data):
+        """Test successful page fetch."""
+        # Mock httpx.AsyncClient
+        mock_session = AsyncMock()
+        mock_response = AsyncMock()
+        mock_response.json.return_value = mock_response_data
+        mock_response.raise_for_status.return_value = None
+        mock_session.get.return_value = mock_response
+        
+        source.session = mock_session
+        
+        # Execute
+        result = await source.fetch_page(0)
+        
+        # Assert
+        assert len(result) == 2
+        assert result[0]["noticeId"] == "729181"
+        assert result[1]["noticeId"] == "729182"
+        
+        # Verify API call
+        mock_session.get.assert_called_once()
+        call_args = mock_session.get.call_args
+        assert "jurisdiction=BC" in str(call_args)
+        assert "status=open" in str(call_args)
+        assert "size=200" in str(call_args)
+        assert "page=0" in str(call_args)
+    
+    @pytest.mark.asyncio
+    async def test_fetch_page_http_error(self, source):
+        """Test page fetch with HTTP error."""
+        # Mock httpx.AsyncClient with error
+        mock_session = AsyncMock()
+        mock_response = AsyncMock()
+        mock_response.raise_for_status.side_effect = Exception("HTTP 500")
+        mock_session.get.return_value = mock_response
+        
+        source.session = mock_session
+        
+        # Execute and assert
+        with pytest.raises(Exception):
+            await source.fetch_page(0)
+    
+    def test_normalize_opportunity(self, source, mock_response_data):
+        """Test opportunity normalization."""
+        # Execute
+        opportunity = source.normalize(mock_response_data["content"][0])
+        
+        # Assert
+        assert isinstance(opportunity, Opportunity)
+        assert opportunity.id == "729181"
+        assert opportunity.title == "Environmental Consulting Services – Fraser Valley"
+        assert opportunity.summary == "Provision of consulting for stream restoration and environmental assessment services in the Fraser Valley region."
+        assert opportunity.buyer == "Ministry of Water, Land and Resource Stewardship"
+        assert opportunity.source == "canadabuys"
+        assert opportunity.jurisdiction == "BC"
+        assert "Services" in opportunity.tags
+        assert "GSIN: R199" in opportunity.tags
+        assert opportunity.docs_url == "https://canadabuys.canada.ca/en/tender-opportunities/729181"
+        assert len(opportunity.document_urls) == 1
+        assert "rfp-729181.pdf" in opportunity.document_urls[0]
+        
+        # Check closing date parsing
+        assert opportunity.close_date is not None
+        assert isinstance(opportunity.close_date, datetime)
+        assert opportunity.close_date.year == 2025
+        assert opportunity.close_date.month == 8
+        assert opportunity.close_date.day == 14
+    
+    def test_normalize_opportunity_no_documents(self, source, mock_response_data):
+        """Test opportunity normalization with no documents."""
+        record = mock_response_data["content"][1]  # Second record has no documents
+        
+        # Execute
+        opportunity = source.normalize(record)
+        
+        # Assert
+        assert opportunity.document_urls is None
+    
+    def test_normalize_opportunity_invalid_date(self, source):
+        """Test opportunity normalization with invalid date."""
+        record = {
+            "noticeId": "test123",
+            "title": "Test Opportunity",
+            "closingDate": "invalid-date"
+        }
+        
+        # Execute
+        opportunity = source.normalize(record)
+        
+        # Assert
+        assert opportunity.close_date is None
+    
+    @pytest.mark.asyncio
+    async def test_stream_opportunities(self, source, mock_response_data):
+        """Test opportunity streaming."""
+        # Mock fetch_page to return data then empty
+        source.fetch_page = AsyncMock(side_effect=[
+            mock_response_data["content"],  # First page
+            []  # Second page (empty)
+        ])
+        
+        # Execute
+        opportunities = []
+        async for opportunity in source.stream_opportunities():
+            opportunities.append(opportunity)
+        
+        # Assert
+        assert len(opportunities) == 2
+        assert all(isinstance(opp, Opportunity) for opp in opportunities)
+        assert opportunities[0].source == "canadabuys"
+        assert opportunities[1].source == "canadabuys"
+    
+    @pytest.mark.asyncio
+    async def test_stream_opportunities_error_handling(self, source):
+        """Test opportunity streaming with error handling."""
+        # Mock fetch_page to raise exception
+        source.fetch_page = AsyncMock(side_effect=Exception("API Error"))
+        
+        # Execute
+        opportunities = []
+        async for opportunity in source.stream_opportunities():
+            opportunities.append(opportunity)
+        
+        # Assert - should handle error gracefully and return empty
+        assert len(opportunities) == 0
+
+
+class TestCanadaBuysIntegration:
+    """Integration tests for CanadaBuys source."""
+    
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_live_api_fetch(self):
+        """Test live API fetch (requires VCR cassette)."""
+        try:
+            async with CanadaBuysSource() as source:
+                # Fetch first page
+                opportunities = await source.fetch_page(0)
                 
-                result = await scraper.scrape_tenders(limit=2)
-                assert isinstance(result, list)
-                assert len(result) == 2
+                # Assert we got some data
+                assert isinstance(opportunities, list)
+                
+                if opportunities:
+                    # Test normalization of first opportunity
+                    opportunity = source.normalize(opportunities[0])
+                    
+                    # Assert basic structure
+                    assert isinstance(opportunity, Opportunity)
+                    assert opportunity.id is not None
+                    assert opportunity.title is not None
+                    assert opportunity.source == "canadabuys"
+                    assert opportunity.jurisdiction == "BC"
+                    
+                    # Assert future closing date
+                    if opportunity.close_date:
+                        assert opportunity.close_date > datetime.now(timezone.utc)
+                    
+                    print(f"✅ Live test successful: {opportunity.title}")
+                else:
+                    print("⚠️ No opportunities found in live test")
+                    
+        except Exception as e:
+            pytest.fail(f"Integration test failed: {e}")
     
     @pytest.mark.asyncio
-    async def test_scrape_tenders_no_results(self, scraper):
-        """Test scraping when no results found."""
-        empty_page = "<html><body><div class='search-results'></div></body></html>"
-        
-        with patch.object(scraper, 'get_page', new_callable=AsyncMock) as mock_get_page:
-            mock_get_page.return_value = empty_page
+    @pytest.mark.integration
+    async def test_live_stream_opportunities(self):
+        """Test live opportunity streaming."""
+        try:
+            count = 0
+            async for opportunity in stream_opportunities():
+                assert isinstance(opportunity, Opportunity)
+                assert opportunity.source == "canadabuys"
+                assert opportunity.jurisdiction == "BC"
+                
+                count += 1
+                if count >= 3:  # Limit to first 3 for testing
+                    break
             
-            result = await scraper.scrape_tenders(limit=10)
-            assert isinstance(result, list)
-            assert len(result) == 0
-    
-    @pytest.mark.asyncio
-    async def test_scrape_tenders_error_handling(self, scraper):
-        """Test error handling during scraping."""
-        with patch.object(scraper, 'get_page', new_callable=AsyncMock) as mock_get_page:
-            mock_get_page.side_effect = Exception("Network error")
+            assert count > 0, "No opportunities found in live stream test"
+            print(f"✅ Live stream test successful: {count} opportunities")
             
-            result = await scraper.scrape_tenders(limit=10)
-            assert isinstance(result, list)
-            assert len(result) == 0
-    
-    def test_extract_contract_value(self, scraper):
-        """Test contract value extraction."""
-        test_cases = [
-            ("Contract Value: $100,000 - $500,000", "$100,000 - $500,000"),
-            ("Estimated Value: $50,000", "$50,000"),
-            ("Budget: $75,000 CAD", "$75,000 CAD"),
-            ("No value specified", None),
-        ]
-        
-        for input_text, expected in test_cases:
-            result = scraper.extract_contract_value(input_text)
-            assert result == expected
-    
-    def test_extract_contact_info(self, scraper):
-        """Test contact information extraction."""
-        contact_html = """
-        <div class="contact-info">
-            <div class="contact-name">Contact: Jane Smith</div>
-            <div class="contact-email">Email: jane.smith@canada.ca</div>
-            <div class="contact-phone">Phone: (613) 555-9876</div>
-        </div>
-        """
-        
-        soup = BeautifulSoup(contact_html, 'html.parser')
-        contact_info = scraper.extract_contact_info(soup)
-        
-        assert contact_info['contact_name'] == "Jane Smith"
-        assert contact_info['contact_email'] == "jane.smith@canada.ca"
-        assert contact_info['contact_phone'] == "(613) 555-9876"
-    
-    @pytest.mark.asyncio
-    async def test_run_method(self, scraper):
-        """Test the main run method."""
-        with patch.object(scraper, 'scrape_tenders', new_callable=AsyncMock) as mock_scrape:
-            mock_scrape.return_value = [
-                {"external_id": "1", "title": "Tender 1"},
-                {"external_id": "2", "title": "Tender 2"}
-            ]
-            with patch.object(scraper, 'save_tender', new_callable=AsyncMock) as mock_save:
-                mock_save.return_value = True
-                count = await scraper.run(limit=10)
-                assert count == 2
-                mock_scrape.assert_called_once_with(10) 
+        except Exception as e:
+            pytest.fail(f"Live stream test failed: {e}")
+
+
+if __name__ == "__main__":
+    """Run tests."""
+    pytest.main([__file__, "-v"]) 

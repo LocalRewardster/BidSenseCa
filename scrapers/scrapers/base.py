@@ -138,33 +138,90 @@ class BaseScraper(ABC):
     async def save_tender(self, tender_data: Dict[str, Any]) -> bool:
         """Save tender data to Supabase."""
         try:
-            # Add source and timestamp
-            tender_data.update({
-                "source": self.source_name,
-                "scraped_at": datetime.now(timezone.utc).isoformat()
-            })
+            # Use the new column names that were added in the migration
+            db_tender_data = {
+                "source_name": self.source_name,  # Use the new source_name column
+                "external_id": tender_data.get("external_id"),
+                "title": tender_data.get("title"),
+                "organization": tender_data.get("organization"),  # Use the new organization column
+                "province": tender_data.get("location"),  # Map location to province
+                "naics": tender_data.get("naics"),
+                "closing_date": tender_data.get("closing_date"),  # Use the new closing_date column
+                "description": tender_data.get("description"),  # Use the new description column
+                "summary_raw": tender_data.get("summary_raw"),  # New field for raw summary
+                "documents_urls": tender_data.get("documents_urls"),  # New field for document URLs
+                "original_url": tender_data.get("original_url"),  # New field for canonical URL
+                "tags_ai": tender_data.get("tags_ai"),
+                "scraped_at": datetime.now(timezone.utc).isoformat(),
+                "category": tender_data.get("category"),  # Use the new category column
+                "reference": tender_data.get("reference"),  # Use the new reference column
+                "contact_name": tender_data.get("contact_name"),  # Use the new contact_name column
+                "contact_email": tender_data.get("contact_email"),  # Use the new contact_email column
+                "contact_phone": tender_data.get("contact_phone"),  # Use the new contact_phone column
+                "source_url": tender_data.get("source_url"),  # Use the new source_url column
+                "contract_value": tender_data.get("contract_value"),  # Use the new contract_value column
+                # Summary information fields
+                "notice_type": tender_data.get("notice_type"),
+                "languages": tender_data.get("languages"),
+                "delivery_regions": tender_data.get("delivery_regions"),
+                "opportunity_region": tender_data.get("opportunity_region"),
+                "contract_duration": tender_data.get("contract_duration"),
+                "procurement_method": tender_data.get("procurement_method"),
+                "selection_criteria": tender_data.get("selection_criteria"),
+                "commodity_unspsc": tender_data.get("commodity_unspsc"),
+            }
+            
+            # Remove None values
+            db_tender_data = {k: v for k, v in db_tender_data.items() if v is not None}
             
             # Check if tender already exists
-            existing = self.supabase.table("tenders").select("id").eq(
-                "source", self.source_name
-            ).eq("external_id", tender_data["external_id"]).execute()
+            existing = self.supabase.table("tenders").select("id").eq("external_id", tender_data.get("external_id")).eq("source_name", self.source_name).execute()
             
             if existing.data:
-                logger.info(f"Tender {tender_data['external_id']} already exists, skipping")
-                return False
+                # Update existing tender with new rich metadata fields
+                tender_id = existing.data[0]["id"]
+                
+                # Only update fields that have new data (rich metadata fields)
+                update_data = {}
+                rich_metadata_fields = [
+                    "summary_raw", "documents_urls", "original_url", 
+                    "contact_name", "contact_email", "contact_phone",
+                    "notice_type", "languages", "delivery_regions", 
+                    "opportunity_region", "contract_duration", 
+                    "procurement_method", "selection_criteria", "commodity_unspsc"
+                ]
+                
+                for field in rich_metadata_fields:
+                    if field in db_tender_data and db_tender_data[field] is not None:
+                        update_data[field] = db_tender_data[field]
+                
+                # Also update scraped_at timestamp
+                update_data["scraped_at"] = db_tender_data["scraped_at"]
+                
+                if update_data:
+                    response = self.supabase.table("tenders").update(update_data).eq("id", tender_id).execute()
+                    if response.data:
+                        logger.info(f"Updated tender {tender_data.get('external_id')} with rich metadata")
+                        return True
+                    else:
+                        logger.error(f"Failed to update tender {tender_data.get('external_id')}")
+                        return False
+                else:
+                    logger.info(f"Tender {tender_data.get('external_id')} already exists, no new data to update")
+                    return True
             
             # Insert new tender
-            result = self.supabase.table("tenders").insert(tender_data).execute()
+            response = self.supabase.table("tenders").insert(db_tender_data).execute()
             
-            if result.data:
-                logger.info(f"Saved tender {tender_data['external_id']}")
+            if response.data:
+                logger.info(f"Saved tender: {tender_data.get('title', 'Unknown')}")
                 return True
             else:
-                logger.error(f"Failed to save tender {tender_data['external_id']}")
+                logger.error(f"Failed to save tender: {tender_data.get('title', 'Unknown')}")
                 return False
                 
         except Exception as e:
-            logger.error(f"Error saving tender {tender_data.get('external_id', 'unknown')}: {e}")
+            logger.error(f"Error saving tender: {e}")
             return False
     
     @abstractmethod

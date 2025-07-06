@@ -8,6 +8,10 @@ from loguru import logger
 from .canadabuys import CanadaBuysScraper
 from .ontario_portal import OntarioPortalScraper
 from .apc import APCScraper
+from .bcbid import BCBidScraper
+from .manitoba import ManitobaScraper
+from .saskatchewan import SaskatchewanScraper
+from .quebec import QuebecScraper
 
 
 class ScraperRunner:
@@ -18,6 +22,10 @@ class ScraperRunner:
             "canadabuys": CanadaBuysScraper,
             "ontario": OntarioPortalScraper,
             "apc": APCScraper,
+            "bcbid": BCBidScraper,
+            "manitoba": ManitobaScraper,
+            "saskatchewan": SaskatchewanScraper,
+            "quebec": QuebecScraper,
         }
     
     async def run_scraper(self, scraper_name: str, limit: int = None) -> int:
@@ -57,7 +65,7 @@ async def main():
     parser = argparse.ArgumentParser(description="BidSense Scrapers")
     parser.add_argument(
         "--scraper", 
-        choices=["canadabuys", "ontario", "apc", "all"], 
+        choices=["canadabuys", "ontario", "apc", "bcbid", "manitoba", "saskatchewan", "quebec", "all"], 
         default="all",
         help="Scraper to run"
     )
