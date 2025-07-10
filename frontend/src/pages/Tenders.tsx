@@ -26,6 +26,7 @@ export default function Tenders() {
   const [selectedSource, setSelectedSource] = useState('all');
   const [selectedProvince, setSelectedProvince] = useState('all');
   const [selectedCategory, setSelectedCategory] = useState('all');
+  const [selectedStatus, setSelectedStatus] = useState('all');
   const [currentPage, setCurrentPage] = useState(1);
   const [sortBy, setSortBy] = useState('created_at');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
@@ -37,6 +38,16 @@ export default function Tenders() {
 
   // Calculate offset for pagination
   const offset = (currentPage - 1) * itemsPerPage;
+
+  // Helper function to determine tender status
+  const getTenderStatus = (tender: Tender) => {
+    if (!tender.closing_date) return 'no_deadline';
+    const closingDate = new Date(tender.closing_date);
+    const now = new Date();
+    if (closingDate < now) return 'closed';
+    if (closingDate.getTime() - now.getTime() < 7 * 24 * 60 * 60 * 1000) return 'closing_soon';
+    return 'open';
+  };
 
   // Fetch filters
   const { data: filters, isLoading: filtersLoading } = useQuery<TenderFilters>({
@@ -62,7 +73,7 @@ export default function Tenders() {
 
   // Fetch tenders from API with filters
   const { data, isLoading, error, refetch } = useQuery({
-    queryKey: ['tenders', searchQuery, selectedSource, selectedProvince, selectedCategory, offset, sortBy, sortOrder, useAdvancedSearch, useAISearch],
+    queryKey: ['tenders', searchQuery, selectedSource, selectedProvince, selectedCategory, selectedStatus, offset, sortBy, sortOrder, useAdvancedSearch, useAISearch],
     queryFn: () => {
       if (useAISearch) {
         // Use AI search endpoint
@@ -92,6 +103,36 @@ export default function Tenders() {
     },
     keepPreviousData: true,
   });
+
+  // Filter tenders by status on the frontend
+  const filteredTenders = useMemo(() => {
+    if (!data?.tenders || selectedStatus === 'all') {
+      return data?.tenders || [];
+    }
+
+    return data.tenders.filter(tender => {
+      const status = getTenderStatus(tender);
+      return status === selectedStatus;
+    });
+  }, [data?.tenders, selectedStatus]);
+
+  // Reset page when status filter changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [selectedStatus]);
+
+  // Calculate filtered total for pagination
+  const filteredTotal = selectedStatus === 'all' ? (data?.total || 0) : filteredTenders.length;
+  const totalPages = Math.ceil(filteredTotal / itemsPerPage);
+
+  // Paginate the filtered tenders
+  const paginatedTenders = useMemo(() => {
+    if (selectedStatus === 'all') {
+      return filteredTenders;
+    }
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    return filteredTenders.slice(startIndex, startIndex + itemsPerPage);
+  }, [filteredTenders, currentPage, itemsPerPage, selectedStatus]);
 
   // Handle click outside search suggestions
   useEffect(() => {
@@ -136,8 +177,6 @@ export default function Tenders() {
     return 'Open';
   };
 
-  const totalPages = data ? Math.ceil(data.total / itemsPerPage) : 0;
-
   const handleSearch = () => {
     setCurrentPage(1); // Reset to first page when searching
     setShowSuggestions(false);
@@ -156,6 +195,7 @@ export default function Tenders() {
     setSelectedSource('all');
     setSelectedProvince('all');
     setSelectedCategory('all');
+    setSelectedStatus('all');
     setCurrentPage(1);
     setSortBy('created_at');
     setSortOrder('desc');
@@ -179,6 +219,7 @@ export default function Tenders() {
     selectedSource !== 'all',
     selectedProvince !== 'all',
     selectedCategory !== 'all',
+    selectedStatus !== 'all',
     sortBy !== 'created_at',
     sortOrder !== 'desc',
     useAdvancedSearch,
@@ -245,7 +286,7 @@ export default function Tenders() {
         />
 
         {/* Additional Filters */}
-        <div className="mt-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="mt-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
           {/* Source Filter */}
           <select
             value={selectedSource}
@@ -297,16 +338,38 @@ export default function Tenders() {
             )}
           </select>
 
+          {/* Status Filter */}
+          <select
+            value={selectedStatus}
+            onChange={(e) => setSelectedStatus(e.target.value)}
+            className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            disabled={filtersLoading}
+          >
+            <option value="all">All Statuses</option>
+            {filtersLoading ? (
+              <option disabled>Loading...</option>
+            ) : (
+              [
+                { value: 'open', label: 'Open' },
+                { value: 'closing_soon', label: 'Closing Soon' },
+                { value: 'closed', label: 'Closed' },
+                { value: 'no_deadline', label: 'No Deadline' },
+              ].map(({ value, label }) => (
+                <option key={value} value={value}>{label}</option>
+              ))
+            )}
+          </select>
+
           {/* Sort By */}
           <select
             value={sortBy}
             onChange={(e) => setSortBy(e.target.value)}
             className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
           >
-            <option value="created_at">Date Added</option>
+            <option value="created_at">Recently Added</option>
+            <option value="closing_date">Closing Date</option>
             <option value="title">Title</option>
             <option value="organization">Organization</option>
-            <option value="closing_date">Closing Date</option>
             {(useAdvancedSearch || useAISearch) && <option value="rank">Relevance</option>}
           </select>
         </div>
@@ -318,9 +381,56 @@ export default function Tenders() {
             onChange={(e) => setSortOrder(e.target.value as 'asc' | 'desc')}
             className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
           >
-            <option value="desc">Descending</option>
-            <option value="asc">Ascending</option>
+            <option value="desc">
+              {sortBy === 'created_at' ? 'Newest First' : 
+               sortBy === 'closing_date' ? 'Latest Closing Date' : 
+               sortBy === 'title' ? 'Z to A' : 
+               sortBy === 'organization' ? 'Z to A' : 'Descending'}
+            </option>
+            <option value="asc">
+              {sortBy === 'created_at' ? 'Oldest First' : 
+               sortBy === 'closing_date' ? 'Earliest Closing Date' : 
+               sortBy === 'title' ? 'A to Z' : 
+               sortBy === 'organization' ? 'A to Z' : 'Ascending'}
+            </option>
           </select>
+
+          {/* Quick Filter Buttons */}
+          <div className="flex items-center space-x-2">
+            <button
+              onClick={() => {
+                setSortBy('created_at');
+                setSortOrder('desc');
+                setSelectedStatus('all');
+                setCurrentPage(1);
+              }}
+              className="px-3 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              Recently Scraped
+            </button>
+            <button
+              onClick={() => {
+                setSelectedStatus('open');
+                setSortBy('closing_date');
+                setSortOrder('asc');
+                setCurrentPage(1);
+              }}
+              className="px-3 py-2 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+            >
+              Open Tenders
+            </button>
+            <button
+              onClick={() => {
+                setSelectedStatus('closing_soon');
+                setSortBy('closing_date');
+                setSortOrder('asc');
+                setCurrentPage(1);
+              }}
+              className="px-3 py-2 text-sm bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 transition-colors"
+            >
+              Closing Soon
+            </button>
+          </div>
 
           {/* Filter Actions */}
           <div className="flex items-center space-x-2">
@@ -335,6 +445,24 @@ export default function Tenders() {
             )}
           </div>
         </div>
+
+        {/* Status Filter Info */}
+        {selectedStatus !== 'all' && (
+          <div className="mt-4 p-3 bg-blue-50 rounded-lg">
+            <div className="flex items-center space-x-2 text-sm">
+              <span className="font-medium text-blue-800">Status Filter:</span>
+              <span className="text-blue-700">
+                {selectedStatus === 'open' && 'Showing tenders with closing dates more than 7 days away'}
+                {selectedStatus === 'closing_soon' && 'Showing tenders closing within 7 days'}
+                {selectedStatus === 'closed' && 'Showing tenders that have already closed'}
+                {selectedStatus === 'no_deadline' && 'Showing tenders without specified closing dates'}
+              </span>
+              <span className="text-blue-600 font-medium">
+                ({filteredTenders.length} {filteredTenders.length === 1 ? 'tender' : 'tenders'})
+              </span>
+            </div>
+          </div>
+        )}
 
         {/* Active Filters Display */}
         {data?.filters_applied && Object.keys(data.filters_applied).length > 0 && !useAISearch && (
@@ -353,10 +481,10 @@ export default function Tenders() {
 
       {/* Search Results */}
       <SearchResults
-        tenders={data?.tenders || []}
+        tenders={paginatedTenders}
         isLoading={isLoading}
         error={error}
-        total={data?.total || 0}
+        total={filteredTotal}
         offset={offset}
         limit={itemsPerPage}
         onTenderClick={handleTenderClick}
@@ -370,7 +498,11 @@ export default function Tenders() {
       {totalPages > 1 && (
         <div className="flex items-center justify-between">
           <div className="text-sm text-gray-700">
-            Page {currentPage} of {totalPages}
+            {selectedStatus === 'all' ? (
+              `Page ${currentPage} of ${totalPages} (${filteredTotal} total)`
+            ) : (
+              `Page ${currentPage} of ${totalPages} (${filteredTotal} filtered results)`
+            )}
           </div>
           <div className="flex space-x-2">
             <button

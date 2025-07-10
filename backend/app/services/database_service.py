@@ -281,61 +281,24 @@ class DatabaseService:
             logger.error(f"Error creating tender: {e}")
             return None
     
-    async def update_tender(self, tender_id: str, tender_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Update an existing tender."""
+    async def update_tender(self, tender_id: str, update_data: Dict[str, Any]) -> bool:
+        """Update a tender with new data."""
         try:
-            # Map frontend fields to database fields
-            db_tender_data = {}
-            field_mapping = {
-                "source_name": "source",
-                "organization": "buyer",
-                "location": "province",
-                "closing_date": "deadline",
-                "description": "summary_ai",
-            }
+            # Add updated timestamp
+            update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
             
-            for frontend_field, db_field in field_mapping.items():
-                if frontend_field in tender_data:
-                    db_tender_data[db_field] = tender_data[frontend_field]
+            response = self.supabase.table("tenders").update(update_data).eq("id", tender_id).execute()
             
-            # Add other fields that don't need mapping
-            for field in ["title", "external_id", "naics", "tags_ai", "scraped_at", "category", 
-                         "reference", "contact_name", "contact_email", "contact_phone", 
-                         "source_url", "contract_value"]:
-                if field in tender_data:
-                    db_tender_data[field] = tender_data[field]
-            
-            response = self.supabase.table("tenders").update(db_tender_data).eq("id", tender_id).execute()
             if response.data:
-                # Map back to frontend format
-                tender = response.data[0]
-                return {
-                    "id": tender.get("id"),
-                    "title": tender.get("title"),
-                    "organization": tender.get("buyer"),
-                    "description": tender.get("summary_ai"),
-                    "contract_value": tender.get("contract_value"),
-                    "closing_date": tender.get("deadline"),
-                    "source_name": tender.get("source_name"),
-                    "location": tender.get("province"),
-                    "url": tender.get("source_url"),
-                    "created_at": tender.get("scraped_at"),
-                    "updated_at": tender.get("scraped_at"),
-                    "category": tender.get("category"),
-                    "reference": tender.get("reference"),
-                    "contact_name": tender.get("contact_name"),
-                    "contact_email": tender.get("contact_email"),
-                    "contact_phone": tender.get("contact_phone"),
-                    "external_id": tender.get("external_id"),
-                    # Rich metadata fields
-                    "summary_raw": tender.get("summary_raw"),
-                    "documents_urls": tender.get("documents_urls"),
-                    "original_url": tender.get("original_url"),
-                }
-            return None
+                logger.info(f"Successfully updated tender {tender_id}")
+                return True
+            else:
+                logger.error(f"Failed to update tender {tender_id}")
+                return False
+                
         except Exception as e:
             logger.error(f"Error updating tender {tender_id}: {e}")
-            return None
+            return False
     
     async def get_tender_filters(self) -> Dict[str, Any]:
         """Get available filter options for tenders."""
@@ -456,6 +419,53 @@ class DatabaseService:
         except Exception as e:
             logger.error(f"Error fetching related tenders: {e}")
             return []
+
+    async def get_tender_by_external_id(self, external_id: str) -> Optional[Dict[str, Any]]:
+        """Get a specific tender by external_id."""
+        try:
+            response = self.supabase.table("tenders").select("*").eq("external_id", external_id).execute()
+            
+            if response.data:
+                tender = response.data[0]
+                return {
+                    "id": tender.get("id"),
+                    "title": tender.get("title"),
+                    "organization": tender.get("organization") or tender.get("buyer"),
+                    "description": tender.get("description") or tender.get("summary_ai"),
+                    "contract_value": tender.get("contract_value"),
+                    "closing_date": tender.get("closing_date") or tender.get("deadline"),
+                    "source_name": tender.get("source_name") or tender.get("source"),
+                    "location": tender.get("province"),
+                    "url": tender.get("source_url"),
+                    "created_at": tender.get("scraped_at"),
+                    "updated_at": tender.get("scraped_at"),
+                    "category": tender.get("category"),
+                    "reference": tender.get("reference"),
+                    "contact_name": tender.get("contact_name"),
+                    "contact_email": tender.get("contact_email"),
+                    "contact_phone": tender.get("contact_phone"),
+                    "external_id": tender.get("external_id"),
+                    # Rich metadata fields
+                    "summary_raw": tender.get("summary_raw"),
+                    "documents_urls": tender.get("documents_urls"),
+                    "original_url": tender.get("original_url"),
+                    # Summary information fields
+                    "notice_type": tender.get("notice_type"),
+                    "languages": tender.get("languages"),
+                    "delivery_regions": tender.get("delivery_regions"),
+                    "opportunity_region": tender.get("opportunity_region"),
+                    "contract_duration": tender.get("contract_duration"),
+                    "procurement_method": tender.get("procurement_method"),
+                    "selection_criteria": tender.get("selection_criteria"),
+                    "commodity_unspsc": tender.get("commodity_unspsc"),
+                    # Enrichment fields
+                    "enriched": tender.get("enriched", False),
+                    "enriched_at": tender.get("enriched_at"),
+                }
+            return None
+        except Exception as e:
+            logger.error(f"Error fetching tender by external_id {external_id}: {e}")
+            return None
 
 
 # Create a singleton instance

@@ -234,6 +234,63 @@ class ApiService {
     return this.request<any>('/api/v1/scrapers/scheduler/status');
   }
 
+  // Enrichment management endpoints
+  async getEnrichmentStatus(): Promise<{
+    status: string;
+    last_run: string | null;
+    last_result: any;
+    error: string | null;
+    incomplete_tenders: number;
+  }> {
+    return this.request<{
+      status: string;
+      last_run: string | null;
+      last_result: any;
+      error: string | null;
+      incomplete_tenders: number;
+    }>('/api/v1/enrichment/status');
+  }
+
+  async getIncompleteTenders(limit: number = 20): Promise<{
+    tenders: any[];
+    count: number;
+  }> {
+    return this.request<{
+      tenders: any[];
+      count: number;
+    }>(`/api/v1/enrichment/incomplete?limit=${limit}`);
+  }
+
+  async processEnrichment(limit: number = 4): Promise<{
+    message: string;
+    processed: number;
+    tasks_created?: number;
+    existing_tasks?: number;
+    error?: string;
+  }> {
+    return this.request<{
+      message: string;
+      processed: number;
+      tasks_created?: number;
+      existing_tasks?: number;
+      error?: string;
+    }>(`/api/v1/enrichment/process?limit=${limit}`, {
+      method: 'POST',
+    });
+  }
+
+  async getEnrichmentDebug(): Promise<{
+    debug_info: any[];
+    total_tenders_checked: number;
+    needs_enrichment_count: number;
+  }> {
+    return this.request<{
+      debug_info: any[];
+      total_tenders_checked: number;
+      needs_enrichment_count: number;
+    }>('/api/v1/enrichment/debug');
+  }
+
   // AI Search method
   async searchWithAI(query: string, params: Omit<TendersParams, 'search'> = {}): Promise<TendersResponse> {
     const searchParams = new URLSearchParams();

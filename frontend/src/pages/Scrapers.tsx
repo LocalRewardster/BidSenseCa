@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import {
@@ -13,6 +13,8 @@ import {
   GlobeAltIcon,
   MapPinIcon,
   InformationCircleIcon,
+  SparklesIcon,
+  TableCellsIcon,
 } from '@heroicons/react/24/outline';
 import { apiService } from '../services/api';
 import toast from 'react-hot-toast';
@@ -34,14 +36,62 @@ interface ScraperLog {
   scraper?: string;
 }
 
+interface EnrichmentStatus {
+  status: string;
+  last_run: string | null;
+  last_result: any;
+  error: string | null;
+  incomplete_tenders: number;
+}
+
 export default function Scrapers() {
   const queryClient = useQueryClient();
   const [selectedScraper, setSelectedScraper] = useState<string | null>(null);
+  const [enrichmentLimit, setEnrichmentLimit] = useState(4);
+  const [isRefreshingTenders, setIsRefreshingTenders] = useState(false);
+
+  // Track previous scraper status to detect changes
+  const previousScraperStatus = useRef<Record<string, string>>({});
 
   // Fetch scraper status from API
   const { data: scraperStatus, isLoading: statusLoading, error: statusError } = useQuery({
     queryKey: ['scraper-status'],
     queryFn: () => apiService.getScraperStatus(),
+    refetchInterval: (data) => {
+      // Use shorter interval if any scraper is running
+      if (data?.data) {
+        const isAnyRunning = Object.values(data.data).some((scraper: any) => scraper.status === 'running');
+        return isAnyRunning ? 5000 : 30000; // 5 seconds when running, 30 seconds when idle
+      }
+      return 30000; // Default to 30 seconds
+    },
+  });
+
+  // Convert API data to the expected format and filter for CanadaBuys only
+  const scrapers = scraperStatus?.data ? Object.entries(scraperStatus.data)
+    .filter(([id]) => id === 'canadabuys')
+    .map(([id, data]: [string, any]) => ({
+      id,
+      name: data.name || 'CanadaBuys',
+      status: data.status,
+      last_run: data.last_run,
+      next_run: data.next_run,
+      total_tenders: data.total_tenders || 0,
+      recent_tenders: data.recent_tenders || 0,
+      error_message: data.error_message,
+    })) : [];
+
+  // Fetch enrichment status from API
+  const { data: enrichmentStatus, isLoading: enrichmentLoading, error: enrichmentError } = useQuery({
+    queryKey: ['enrichment-status'],
+    queryFn: () => apiService.getEnrichmentStatus(),
+    refetchInterval: 10000, // Refetch every 10 seconds
+  });
+
+  // Fetch incomplete tenders for preview
+  const { data: incompleteTenders, isLoading: incompleteTendersLoading } = useQuery({
+    queryKey: ['incomplete-tenders'],
+    queryFn: () => apiService.getIncompleteTenders(3), // Get 3 for preview
     refetchInterval: 30000, // Refetch every 30 seconds
   });
 
@@ -51,6 +101,62 @@ export default function Scrapers() {
     queryFn: () => apiService.getScraperLogs(selectedScraper),
     refetchInterval: 30000, // Refetch every 30 seconds
   });
+
+  // Detect scraper completion and refresh tenders
+  useEffect(() => {
+    if (scraperStatus?.data) {
+      const currentStatuses: Record<string, string> = {};
+      
+      // Check each scraper's status
+      Object.entries(scraperStatus.data).forEach(([scraperId, data]: [string, any]) => {
+        const currentStatus = data.status;
+        const previousStatus = previousScraperStatus.current[scraperId];
+        
+        currentStatuses[scraperId] = currentStatus;
+        
+        // If scraper changed from 'running' to 'completed', refresh tenders
+        if (previousStatus === 'running' && currentStatus === 'completed') {
+          console.log(`Scraper ${scraperId} completed, refreshing tenders...`);
+          
+          // Set refreshing state
+          setIsRefreshingTenders(true);
+          
+          // Invalidate all tender-related queries to refresh the data
+          Promise.all([
+            queryClient.invalidateQueries({ queryKey: ['tenders'] }),
+            queryClient.invalidateQueries({ queryKey: ['tender-stats'] }),
+            queryClient.invalidateQueries({ queryKey: ['recent-tenders'] }),
+            queryClient.invalidateQueries({ queryKey: ['tender-filters'] }),
+            queryClient.invalidateQueries({ queryKey: ['search-suggestions'] }),
+            queryClient.invalidateQueries({ queryKey: ['search-examples'] }),
+          ]).then(() => {
+            // Clear refreshing state after all queries are invalidated
+            setIsRefreshingTenders(false);
+          });
+          
+          // Show success notification with tender count
+          const recentTenders = data.recent_tenders || 0;
+          const totalTenders = data.total_tenders || 0;
+          toast.success(
+            `${data.name || scraperId} scraper completed! ${recentTenders} new tenders added. Total: ${totalTenders}`,
+            { duration: 6000 }
+          );
+        }
+        
+        // If scraper changed from 'running' to 'failed', show error
+        if (previousStatus === 'running' && currentStatus === 'failed') {
+          console.log(`Scraper ${scraperId} failed`);
+          toast.error(
+            `${data.name || scraperId} scraper failed: ${data.error_message || 'Unknown error'}`,
+            { duration: 8000 }
+          );
+        }
+      });
+      
+      // Update previous status for next comparison
+      previousScraperStatus.current = currentStatuses;
+    }
+  }, [scraperStatus, queryClient]);
 
   // Trigger scraper mutation
   const triggerScraperMutation = useMutation({
@@ -64,6 +170,33 @@ export default function Scrapers() {
     },
     onError: (error) => {
       toast.error('Failed to trigger scraper');
+    },
+  });
+
+  // Trigger enrichment mutation
+  const triggerEnrichmentMutation = useMutation({
+    mutationFn: async (limit: number) => {
+      return apiService.processEnrichment(limit);
+    },
+    onSuccess: (data) => {
+      // Show detailed success message based on the response
+      if (data.tasks_created && data.tasks_created > 0) {
+        toast.success(
+          `Enrichment completed! ${data.tasks_created} tasks created in Airtable for VAs to process.`,
+          { duration: 6000 }
+        );
+      } else if (data.processed === 0) {
+        toast.success('No tenders currently need enrichment.', { duration: 4000 });
+      } else {
+        toast.success(data.message || 'Enrichment process completed successfully');
+      }
+      
+      // Refresh enrichment status and incomplete tenders
+      queryClient.invalidateQueries({ queryKey: ['enrichment-status'] });
+      queryClient.invalidateQueries({ queryKey: ['incomplete-tenders'] });
+    },
+    onError: (error: any) => {
+      toast.error(error.message || 'Failed to trigger enrichment');
     },
   });
 
@@ -112,19 +245,9 @@ export default function Scrapers() {
     triggerScraperMutation.mutate(scraperName);
   };
 
-  // Convert API data to the expected format and filter for CanadaBuys only
-  const scrapers = scraperStatus?.data ? Object.entries(scraperStatus.data)
-    .filter(([id]) => id === 'canadabuys')
-    .map(([id, data]: [string, any]) => ({
-      id,
-      name: data.name || 'CanadaBuys',
-      status: data.status,
-      last_run: data.last_run,
-      next_run: data.next_run,
-      total_tenders: data.total_tenders || 0,
-      recent_tenders: data.recent_tenders || 0,
-      error_message: data.error_message,
-    })) : [];
+  const handleTriggerEnrichment = () => {
+    triggerEnrichmentMutation.mutate(enrichmentLimit);
+  };
 
   const logs = scraperLogs?.data || [];
 
@@ -138,18 +261,20 @@ export default function Scrapers() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Scraper Management</h1>
-          <p className="text-gray-600 mt-1">Monitor and control the CanadaBuys tender scraper</p>
+          <p className="text-gray-600 mt-1">Monitor and control the CanadaBuys tender scraper and data enrichment</p>
         </div>
         <div className="flex space-x-2">
           <button
             onClick={() => {
               queryClient.invalidateQueries({ queryKey: ['scraper-status'] });
               queryClient.invalidateQueries({ queryKey: ['scraper-logs'] });
+              queryClient.invalidateQueries({ queryKey: ['enrichment-status'] });
             }}
+            disabled={isRefreshingTenders}
             className="btn-secondary"
           >
-            <ArrowPathIcon className="w-4 h-4 mr-2" />
-            Refresh
+            <ArrowPathIcon className={`w-4 h-4 mr-2 ${isRefreshingTenders ? 'animate-spin' : ''}`} />
+            {isRefreshingTenders ? 'Refreshing...' : 'Refresh'}
           </button>
         </div>
       </div>
@@ -172,8 +297,27 @@ export default function Scrapers() {
         </div>
       </motion.div>
 
+      {/* Tenders Refreshing Banner */}
+      {isRefreshingTenders && (
+        <motion.div
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="card p-4 bg-green-50 border border-green-200"
+        >
+          <div className="flex items-center">
+            <ArrowPathIcon className="w-5 h-5 text-green-600 mr-2 animate-spin" />
+            <div>
+              <h3 className="text-sm font-medium text-green-800">Refreshing Tenders</h3>
+              <p className="text-sm text-green-700 mt-1">
+                Scraper completed successfully! Updating tender data across all pages...
+              </p>
+            </div>
+          </div>
+        </motion.div>
+      )}
+
       {/* Error Display */}
-      {(statusError || logsError) && (
+      {(statusError || logsError || enrichmentError) && (
         <motion.div
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
@@ -191,9 +335,9 @@ export default function Scrapers() {
         </motion.div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
         {/* Scraper Status */}
-        <div className="lg:col-span-2">
+        <div>
           <div className="card">
             <div className="p-6 border-b border-gray-200">
               <h2 className="text-xl font-semibold text-gray-900">CanadaBuys Status</h2>
@@ -260,52 +404,128 @@ export default function Scrapers() {
           </div>
         </div>
 
-        {/* Quick Stats */}
+        {/* Data Enrichment */}
         <div>
           <div className="card">
             <div className="p-6 border-b border-gray-200">
-              <h2 className="text-xl font-semibold text-gray-900">Quick Stats</h2>
+              <div className="flex items-center">
+                <SparklesIcon className="w-5 h-5 text-purple-600 mr-2" />
+                <h2 className="text-xl font-semibold text-gray-900">Data Enrichment</h2>
+              </div>
             </div>
             <div className="p-6">
-              {statusLoading ? (
+              {enrichmentLoading ? (
                 <div className="space-y-4">
-                  {[1, 2, 3, 4].map((i) => (
-                    <div key={i} className="animate-pulse">
-                      <div className="h-4 bg-gray-200 rounded w-3/4 mb-2"></div>
-                      <div className="h-3 bg-gray-200 rounded w-1/2"></div>
-                    </div>
-                  ))}
+                  <div className="animate-pulse">
+                    <div className="h-16 bg-gray-200 rounded-lg"></div>
+                  </div>
                 </div>
               ) : (
                 <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium text-gray-600">Scraper Status</span>
-                    <span className={`text-lg font-bold ${
-                      scrapers[0]?.status === 'running' ? 'text-blue-600' :
-                      scrapers[0]?.status === 'completed' ? 'text-green-600' :
-                      scrapers[0]?.status === 'failed' ? 'text-red-600' : 'text-gray-600'
-                    }`}>
-                      {scrapers[0]?.status || 'idle'}
-                    </span>
+                  {/* Status */}
+                  <div className="flex items-center justify-between p-4 bg-purple-50 rounded-lg">
+                    <div className="flex items-center space-x-3">
+                      <TableCellsIcon className="w-5 h-5 text-purple-600" />
+                      <div>
+                        <h3 className="font-medium text-purple-900">Enrichment System</h3>
+                        <p className="text-sm text-purple-700">
+                          {enrichmentStatus?.incomplete_tenders || 0} tenders need enrichment
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      {triggerEnrichmentMutation.isPending && (
+                        <ArrowPathIcon className="w-4 h-4 animate-spin text-purple-600" />
+                      )}
+                      <span className={`inline-block px-2 py-1 text-xs font-semibold rounded-full ${
+                        triggerEnrichmentMutation.isPending ? 'bg-blue-100 text-blue-800' :
+                        enrichmentStatus?.status === 'running' ? 'bg-blue-100 text-blue-800' :
+                        enrichmentStatus?.status === 'idle' ? 'bg-gray-100 text-gray-800' :
+                        'bg-green-100 text-green-800'
+                      }`}>
+                        {triggerEnrichmentMutation.isPending ? 'processing' : (enrichmentStatus?.status || 'idle')}
+                      </span>
+                    </div>
                   </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium text-gray-600">Total Tenders</span>
-                    <span className="text-lg font-bold text-gray-900">
-                      {scrapers[0]?.total_tenders || 0}
-                    </span>
+
+                  {/* Settings */}
+                  <div className="space-y-3">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Max Tenders to Enrich
+                      </label>
+                      <input
+                        type="number"
+                        min="1"
+                        max="100"
+                        value={enrichmentLimit}
+                        onChange={(e) => setEnrichmentLimit(parseInt(e.target.value) || 4)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                      />
+                    </div>
                   </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium text-gray-600">Recent Tenders</span>
-                    <span className="text-lg font-bold text-gray-900">
-                      {scrapers[0]?.recent_tenders || 0}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium text-gray-600">Last Run</span>
-                    <span className="text-sm text-gray-500">
-                      {formatDateTime(scrapers[0]?.last_run)}
-                    </span>
-                  </div>
+
+                  {/* Trigger Button */}
+                  <button
+                    onClick={handleTriggerEnrichment}
+                    disabled={triggerEnrichmentMutation.isPending}
+                    className="w-full bg-purple-600 text-white px-4 py-2 rounded-md hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  >
+                    {triggerEnrichmentMutation.isPending ? (
+                      <>
+                        <ArrowPathIcon className="w-4 h-4 mr-2 inline animate-spin" />
+                        Processing...
+                      </>
+                    ) : (
+                      <>
+                        <SparklesIcon className="w-4 h-4 mr-2 inline" />
+                        Process Enrichment
+                      </>
+                    )}
+                  </button>
+
+                  {/* Last Result */}
+                  {enrichmentStatus?.last_run && (
+                    <div className="mt-4 p-3 bg-green-50 rounded-lg">
+                      <p className="text-sm text-green-800">
+                        Last run: {formatDateTime(enrichmentStatus.last_run)}
+                      </p>
+                      {enrichmentStatus.error && (
+                        <p className="text-xs text-red-600 mt-1">Error: {enrichmentStatus.error}</p>
+                      )}
+                      {enrichmentStatus.last_result && (
+                        <p className="text-xs text-green-600 mt-1">
+                          {enrichmentStatus.last_result.message || 'Successfully processed'}
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Preview of Incomplete Tenders */}
+                  {incompleteTenders?.tenders && incompleteTenders.tenders.length > 0 && (
+                    <div className="mt-4 p-3 bg-gray-50 rounded-lg">
+                      <h4 className="text-sm font-medium text-gray-800 mb-2">
+                        Sample Tenders Needing Enrichment:
+                      </h4>
+                      <div className="space-y-2">
+                        {incompleteTenders.tenders.slice(0, 3).map((tender, index) => (
+                          <div key={tender.id} className="text-xs">
+                            <p className="font-medium text-gray-700 truncate">
+                              {tender.title}
+                            </p>
+                            <p className="text-gray-500">
+                              {tender.organization} • Created: {formatDateTime(tender.created_at)}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                      {incompleteTenders.count > 3 && (
+                        <p className="text-xs text-gray-500 mt-2">
+                          ...and {incompleteTenders.count - 3} more tenders
+                        </p>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
             </div>

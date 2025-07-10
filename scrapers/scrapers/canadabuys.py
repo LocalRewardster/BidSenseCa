@@ -77,14 +77,14 @@ class CanadaBuysScraper(BaseScraper):
             result = await ai_province_service.detect_province(tender_data)
             
             # Log the AI reasoning for debugging
-            self.logger.info(f"AI Province Detection - {tender_data.get('title', 'Unknown')[:50]}...")
-            self.logger.info(f"  → {result.province} (confidence: {result.confidence:.2f})")
-            self.logger.info(f"  → Reasoning: {result.reasoning}")
+            logger.info(f"AI Province Detection - {tender_data.get('title', 'Unknown')[:50]}...")
+            logger.info(f"  → {result.province} (confidence: {result.confidence:.2f})")
+            logger.info(f"  → Reasoning: {result.reasoning}")
             
             return result.province
             
         except Exception as e:
-            self.logger.error(f"AI province detection failed: {e}")
+            logger.error(f"AI province detection failed: {e}")
             # Fallback to rule-based detection
             return self.detect_jurisdiction(tender_data.get('organization', ''), tender_data.get('title', ''))
 
@@ -139,32 +139,33 @@ class CanadaBuysScraper(BaseScraper):
         """
         results = []
         
-        # Find all tender result rows
-        tender_rows = soup.find_all('tr', class_='searchResultsRow')
+        # Find the tender table and get data rows (skip header row)
+        table = soup.find('table', class_='eps-table')
+        if not table:
+            return results
+        
+        tender_rows = table.find_all('tr')[1:]  # Skip header row
         
         for row in tender_rows:
             try:
                 # Extract basic tender information
-                title_cell = row.find('td', class_='searchResultsTitle')
-                if not title_cell:
+                cells = row.find_all('td')
+                if len(cells) < 5:
                     continue
                 
+                title_cell = cells[0]
                 title_link = title_cell.find('a')
                 if not title_link:
                     continue
                 
                 title = title_link.get_text(strip=True)
-                url = urljoin(self.base_url, title_link.get('href', ''))
+                url = title_link.get('href', '')
                 
-                # Extract additional information
-                cells = row.find_all('td')
-                if len(cells) < 6:
-                    continue
-                
+                # Extract additional information from other cells
                 category = cells[1].get_text(strip=True) if len(cells) > 1 else ''
-                organization = cells[2].get_text(strip=True) if len(cells) > 2 else ''
-                open_date = cells[3].get_text(strip=True) if len(cells) > 3 else ''
-                closing_date = cells[4].get_text(strip=True) if len(cells) > 4 else ''
+                open_date = cells[2].get_text(strip=True) if len(cells) > 2 else ''
+                closing_date = cells[3].get_text(strip=True) if len(cells) > 3 else ''
+                organization = cells[4].get_text(strip=True) if len(cells) > 4 else ''
                 
                 # Prepare tender data for AI analysis
                 tender_data = {
@@ -190,7 +191,7 @@ class CanadaBuysScraper(BaseScraper):
                 })
                 
             except Exception as e:
-                self.logger.error(f"Error parsing tender row: {e}")
+                logger.error(f"Error parsing tender row: {e}")
                 continue
         
         return results
@@ -753,13 +754,13 @@ class CanadaBuysScraper(BaseScraper):
         try:
             # Build search URL
             search_url = self.build_search_url(limit)
-            self.logger.info(f"Scraping search results from: {search_url}")
+            logger.info(f"Scraping search results from: {search_url}")
             
             # Fetch search results
             async with aiohttp.ClientSession() as session:
                 async with session.get(search_url) as response:
                     if response.status != 200:
-                        self.logger.error(f"Failed to fetch search results: {response.status}")
+                        logger.error(f"Failed to fetch search results: {response.status}")
                         return opportunities
                     
                     search_html = await response.text()
@@ -769,14 +770,14 @@ class CanadaBuysScraper(BaseScraper):
             opportunities = await self.parse_search_results_ai(soup)
             
             if not opportunities:
-                self.logger.warning("No opportunities found in search results")
+                logger.warning("No opportunities found in search results")
                 return opportunities
             
-            self.logger.info(f"Found {len(opportunities)} opportunities with AI province detection")
+            logger.info(f"Found {len(opportunities)} opportunities with AI province detection")
             return opportunities
             
         except Exception as e:
-            self.logger.error(f"Error scraping search results: {e}")
+            logger.error(f"Error scraping search results: {e}")
             return opportunities
 
 
